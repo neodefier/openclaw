@@ -29,6 +29,7 @@ describe("resolveEmbeddedRunSkillEntries", () => {
 
     const result = resolveEmbeddedRunSkillEntries({
       workspaceDir: "/tmp/workspace",
+      agentId: "writer",
       config,
       skillsSnapshot: {
         prompt: "skills prompt",
@@ -38,7 +39,10 @@ describe("resolveEmbeddedRunSkillEntries", () => {
 
     expect(result.shouldLoadSkillEntries).toBe(true);
     expect(loadWorkspaceSkillEntriesSpy).toHaveBeenCalledTimes(1);
-    expect(loadWorkspaceSkillEntriesSpy).toHaveBeenCalledWith("/tmp/workspace", { config });
+    expect(loadWorkspaceSkillEntriesSpy).toHaveBeenCalledWith("/tmp/workspace", {
+      config,
+      agentId: "writer",
+    });
   });
 
   it("prefers the active runtime snapshot when caller config still contains SecretRefs", () => {
@@ -68,6 +72,7 @@ describe("resolveEmbeddedRunSkillEntries", () => {
 
     resolveEmbeddedRunSkillEntries({
       workspaceDir: "/tmp/workspace",
+      agentId: "writer",
       config: sourceConfig,
       skillsSnapshot: {
         prompt: "skills prompt",
@@ -77,6 +82,7 @@ describe("resolveEmbeddedRunSkillEntries", () => {
 
     expect(loadWorkspaceSkillEntriesSpy).toHaveBeenCalledWith("/tmp/workspace", {
       config: runtimeConfig,
+      agentId: "writer",
     });
   });
 

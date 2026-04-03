@@ -64,6 +64,20 @@ describe("skills entries config schema", () => {
     expect(res.success).toBe(true);
   });
 
+  it("accepts skills.policy override for the implicit main agent", () => {
+    const res = OpenClawSchema.safeParse({
+      skills: {
+        policy: {
+          agentOverrides: {
+            main: { enabled: ["docs-search"] },
+          },
+        },
+      },
+    });
+
+    expect(res.success).toBe(true);
+  });
+
   it("rejects unknown skills.policy agent overrides", () => {
     const res = OpenClawSchema.safeParse({
       agents: {
@@ -88,6 +102,37 @@ describe("skills entries config schema", () => {
         (issue) =>
           issue.path.join(".") === "skills.policy.agentOverrides.reviewer" &&
           issue.message.includes('Unknown agent id "reviewer"'),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects overlapping enabled and disabled skills for one agent override", () => {
+    const res = OpenClawSchema.safeParse({
+      agents: {
+        list: [{ id: "writer" }],
+      },
+      skills: {
+        policy: {
+          agentOverrides: {
+            writer: {
+              enabled: ["docs_search"],
+              disabled: ["docs.search"],
+            },
+          },
+        },
+      },
+    });
+
+    expect(res.success).toBe(false);
+    if (res.success) {
+      return;
+    }
+
+    expect(
+      res.error.issues.some(
+        (issue) =>
+          issue.path.join(".") === "skills.policy.agentOverrides.writer" &&
+          issue.message.includes("cannot be both enabled and disabled"),
       ),
     ).toBe(true);
   });

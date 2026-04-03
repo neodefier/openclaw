@@ -32,6 +32,7 @@ Docs: https://docs.openclaw.ai
 - Matrix: allow secret-storage recreation during automatic repair bootstrap so clients that lose their recovery key can recover and persist new cross-signing keys. (#59846) Thanks @al3mart.
 - Matrix/crypto persistence: capture and write the IndexedDB snapshot while holding the snapshot file lock so concurrent gateway and CLI persists cannot overwrite newer crypto state. (#59851) Thanks @al3mart.
 - Telegram/media: keep inbound image attachments readable on upgraded installs where legacy state roots still differ from the managed config-dir media cache. (#59971) Thanks @neeravmakwana.
+- Agents/skills: enforce agent-scoped `skills.policy` during embedded fallback runs, accept implicit `main` policy overrides, and reject conflicting per-agent enable/disable overlaps. (#59992) Thanks @gumadeiras.
 
 ## 2026.4.2
 

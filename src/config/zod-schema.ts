@@ -2,6 +2,7 @@ import { z } from "zod";
 import { parseByteSize } from "../cli/parse-bytes.js";
 import { parseDurationMs } from "../cli/parse-duration.js";
 import { normalizeAgentId } from "../routing/session-key.js";
+import { normalizeStringEntries } from "../shared/string-normalization.js";
 import { ToolsSchema } from "./zod-schema.agent-runtime.js";
 import { AgentsSchema, AudioSchema, BindingsSchema, BroadcastSchema } from "./zod-schema.agents.js";
 import { ApprovalsSchema } from "./zod-schema.approvals.js";
@@ -70,6 +71,17 @@ const MemoryQmdUpdateSchema = z
     embedTimeoutMs: z.number().int().nonnegative().optional(),
   })
   .strict();
+
+function canonicalizePolicySkillName(value: string): string {
+  return value.trim().toLowerCase().replace(/[._]/g, "-");
+}
+
+function normalizePolicySkillNames(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return Array.from(new Set(normalizeStringEntries(input)));
+}
 
 const MemoryQmdLimitsSchema = z
   .object({
@@ -983,11 +995,14 @@ export const OpenClawSchema = z
   .superRefine((cfg, ctx) => {
     const agents = cfg.agents?.list ?? [];
     const normalizedAgentIds = new Set(agents.map((agent) => normalizeAgentId(agent.id)));
+    if (normalizedAgentIds.size === 0) {
+      normalizedAgentIds.add(normalizeAgentId(undefined));
+    }
     const agentOverrides = cfg.skills?.policy?.agentOverrides;
     const isTestAgentOverrideKey = (agentId: string) => /^test-agent(?:[-_:].*)?$/i.test(agentId);
     if (agentOverrides && typeof agentOverrides === "object") {
       const normalizedOverrideKeys = new Map<string, string>();
-      for (const overrideAgentId of Object.keys(agentOverrides)) {
+      for (const [overrideAgentId, override] of Object.entries(agentOverrides)) {
         const normalizedOverrideKey = normalizeAgentId(overrideAgentId);
         const existingOverrideKey = normalizedOverrideKeys.get(normalizedOverrideKey);
         if (existingOverrideKey && existingOverrideKey !== overrideAgentId) {
@@ -1010,7 +1025,30 @@ export const OpenClawSchema = z
             path: ["skills", "policy", "agentOverrides", overrideAgentId],
             message:
               `Unknown agent id "${overrideAgentId}" in skills.policy.agentOverrides ` +
-              "(not in agents.list[].id).",
+              "(not a configured runtime agent id).",
+          });
+        }
+
+        const enabledAliases = new Set(
+          normalizePolicySkillNames(override.enabled).map((name) =>
+            canonicalizePolicySkillName(name),
+          ),
+        );
+        const disabledAliases = new Set(
+          normalizePolicySkillNames(override.disabled).map((name) =>
+            canonicalizePolicySkillName(name),
+          ),
+        );
+        const overlap = [...enabledAliases].filter(
+          (alias) => alias.length > 0 && disabledAliases.has(alias),
+        );
+        if (overlap.length > 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["skills", "policy", "agentOverrides", overrideAgentId],
+            message:
+              `Conflicting skills.policy override for "${overrideAgentId}": the same skill ` +
+              `cannot be both enabled and disabled (${overlap.toSorted().join(", ")}).`,
           });
         }
       }

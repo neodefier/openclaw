@@ -29,6 +29,45 @@ describe("resolveSkillsPromptForRun", () => {
     expect(prompt).toContain("<available_skills>");
     expect(prompt).toContain("/app/skills/demo-skill/SKILL.md");
   });
+
+  it("applies skills.policy when rebuilding prompt from entries for an agent", () => {
+    const visible: SkillEntry = {
+      skill: createFixtureSkill({
+        name: "github",
+        description: "GitHub",
+        filePath: "/app/skills/github/SKILL.md",
+        baseDir: "/app/skills/github",
+        source: "openclaw-workspace",
+      }),
+      frontmatter: {},
+    };
+    const hidden: SkillEntry = {
+      skill: createFixtureSkill({
+        name: "hidden-skill",
+        description: "Hidden",
+        filePath: "/app/skills/hidden-skill/SKILL.md",
+        baseDir: "/app/skills/hidden-skill",
+        source: "openclaw-workspace",
+      }),
+      frontmatter: {},
+    };
+
+    const prompt = resolveSkillsPromptForRun({
+      entries: [visible, hidden],
+      config: {
+        skills: {
+          policy: {
+            globalEnabled: ["github"],
+          },
+        },
+      },
+      workspaceDir: "/tmp/openclaw",
+      agentId: "writer",
+    });
+
+    expect(prompt).toContain("/app/skills/github/SKILL.md");
+    expect(prompt).not.toContain("/app/skills/hidden-skill/SKILL.md");
+  });
 });
 
 function createFixtureSkill(params: {
