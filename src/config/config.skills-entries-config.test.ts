@@ -44,4 +44,51 @@ describe("skills entries config schema", () => {
       ),
     ).toBe(true);
   });
+
+  it("accepts valid skills.policy agent overrides", () => {
+    const res = OpenClawSchema.safeParse({
+      agents: {
+        list: [{ id: "writer" }, { id: "reviewer" }],
+      },
+      skills: {
+        policy: {
+          globalEnabled: ["github", "weather"],
+          agentOverrides: {
+            writer: { enabled: ["docs-search"] },
+            reviewer: { disabled: ["weather"] },
+          },
+        },
+      },
+    });
+
+    expect(res.success).toBe(true);
+  });
+
+  it("rejects unknown skills.policy agent overrides", () => {
+    const res = OpenClawSchema.safeParse({
+      agents: {
+        list: [{ id: "writer" }],
+      },
+      skills: {
+        policy: {
+          agentOverrides: {
+            reviewer: { enabled: ["docs-search"] },
+          },
+        },
+      },
+    });
+
+    expect(res.success).toBe(false);
+    if (res.success) {
+      return;
+    }
+
+    expect(
+      res.error.issues.some(
+        (issue) =>
+          issue.path.join(".") === "skills.policy.agentOverrides.reviewer" &&
+          issue.message.includes('Unknown agent id "reviewer"'),
+      ),
+    ).toBe(true);
+  });
 });

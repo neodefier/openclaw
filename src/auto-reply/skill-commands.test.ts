@@ -33,24 +33,60 @@ function resolveWorkspaceSkills(
       { skillName: "extra-skill", description: "Extra skill" },
     ];
   }
+  if (dirName === "shared-policy") {
+    return [
+      { skillName: "alpha-skill", description: "Alpha skill" },
+      { skillName: "beta-skill", description: "Beta skill" },
+      { skillName: "hidden-skill", description: "Hidden skill" },
+    ];
+  }
   return [];
 }
 
 function buildWorkspaceSkillCommandSpecs(
   workspaceDir: string,
-  opts?: { reservedNames?: Set<string>; skillFilter?: string[] },
+  opts?: {
+    reservedNames?: Set<string>;
+    skillFilter?: string[];
+    agentId?: string;
+    config?: {
+      skills?: {
+        policy?: {
+          globalEnabled?: string[];
+          agentOverrides?: Record<string, { enabled?: string[]; disabled?: string[] }>;
+        };
+      };
+    };
+  },
 ) {
   const used = new Set<string>();
   for (const reserved of opts?.reservedNames ?? []) {
     used.add(String(reserved).toLowerCase());
   }
   const filter = opts?.skillFilter;
-  const entries =
-    filter === undefined
-      ? resolveWorkspaceSkills(workspaceDir)
-      : resolveWorkspaceSkills(workspaceDir).filter((entry) =>
-          filter.some((skillName) => skillName === entry.skillName),
-        );
+  const allEntries = resolveWorkspaceSkills(workspaceDir);
+  const policy = opts?.config?.skills?.policy;
+  const override =
+    (opts?.agentId ? policy?.agentOverrides?.[opts.agentId] : undefined) ?? undefined;
+  const effectivePolicySkills = policy
+    ? Array.from(
+        new Set([
+          ...(policy.globalEnabled ?? []).filter(
+            (name) => !(override?.disabled ?? []).includes(name),
+          ),
+          ...(override?.enabled ?? []),
+        ]),
+      )
+    : undefined;
+  const entries = allEntries.filter((entry) => {
+    if (filter !== undefined && !filter.some((skillName) => skillName === entry.skillName)) {
+      return false;
+    }
+    if (effectivePolicySkills && !effectivePolicySkills.includes(entry.skillName)) {
+      return false;
+    }
+    return true;
+  });
 
   return entries.map((entry) => {
     const base = entry.skillName.replace(/-/g, "_");
@@ -290,6 +326,35 @@ describe("listSkillCommandsForAgents", () => {
     });
 
     expect(commands.map((entry) => entry.skillName)).toEqual(["extra-skill"]);
+  });
+
+  it("does not leak policy-hidden skills when agents share one workspace", async () => {
+    const baseDir = await makeTempDir("openclaw-skills-policy-");
+    const sharedWorkspace = path.join(baseDir, "shared-policy");
+    await fs.mkdir(sharedWorkspace, { recursive: true });
+
+    const commands = listSkillCommandsForAgents({
+      cfg: {
+        agents: {
+          list: [
+            { id: "alpha", workspace: sharedWorkspace },
+            { id: "beta", workspace: sharedWorkspace },
+          ],
+        },
+        skills: {
+          policy: {
+            globalEnabled: ["alpha-skill", "beta-skill", "hidden-skill"],
+            agentOverrides: {
+              alpha: { disabled: ["beta-skill", "hidden-skill"] },
+              beta: { disabled: ["alpha-skill", "hidden-skill"] },
+            },
+          },
+        },
+      },
+      agentIds: ["alpha", "beta"],
+    });
+
+    expect(commands.map((entry) => entry.skillName)).toEqual(["alpha-skill", "beta-skill"]);
   });
 
   it("skips agents with missing workspaces gracefully", async () => {

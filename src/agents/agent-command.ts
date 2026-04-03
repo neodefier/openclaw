@@ -78,7 +78,9 @@ import {
   resolveThinkingDefault,
 } from "./model-selection.js";
 import { buildWorkspaceSkillSnapshot } from "./skills.js";
-import { getSkillsSnapshotVersion } from "./skills/refresh.js";
+import { matchesSkillFilter } from "./skills/filter.js";
+import { matchesSkillPolicySnapshot, resolveSkillPolicySnapshot } from "./skills/policy.js";
+import { getSkillsSnapshotVersion, shouldRefreshSnapshotForVersion } from "./skills/refresh.js";
 import { normalizeSpawnedRunMetadata } from "./spawned-context.js";
 import { resolveAgentTimeoutMs } from "./timeout.js";
 import { ensureAgentWorkspace } from "./workspace.js";
@@ -497,17 +499,25 @@ async function agentCommandInternal(
       });
     }
 
-    const needsSkillsSnapshot = isNewSession || !sessionEntry?.skillsSnapshot;
     const skillsSnapshotVersion = getSkillsSnapshotVersion(workspaceDir);
     const skillFilter = resolveAgentSkillsFilter(cfg, sessionAgentId);
+    const currentSkillsSnapshot = sessionEntry?.skillsSnapshot;
+    const policySnapshot = resolveSkillPolicySnapshot(cfg, sessionAgentId);
+    const shouldRefreshSkillsSnapshot =
+      !currentSkillsSnapshot ||
+      shouldRefreshSnapshotForVersion(currentSkillsSnapshot.version, skillsSnapshotVersion) ||
+      !matchesSkillFilter(currentSkillsSnapshot.skillFilter, skillFilter) ||
+      !matchesSkillPolicySnapshot(currentSkillsSnapshot.policy, policySnapshot);
+    const needsSkillsSnapshot = isNewSession || shouldRefreshSkillsSnapshot;
     const skillsSnapshot = needsSkillsSnapshot
       ? buildWorkspaceSkillSnapshot(workspaceDir, {
           config: cfg,
           eligibility: { remote: getRemoteSkillEligibility() },
           snapshotVersion: skillsSnapshotVersion,
           skillFilter,
+          agentId: sessionAgentId,
         })
-      : sessionEntry?.skillsSnapshot;
+      : currentSkillsSnapshot;
 
     if (skillsSnapshot && sessionStore && sessionKey && needsSkillsSnapshot) {
       const current = sessionEntry ?? {

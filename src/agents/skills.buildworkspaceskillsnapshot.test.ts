@@ -177,6 +177,54 @@ describe("buildWorkspaceSkillSnapshot", () => {
     expect(snapshot.prompt.length).toBeLessThan(2000);
   });
 
+  it("applies skills.policy for the target agent and records the resolved policy", async () => {
+    const workspaceDir = await fixtureSuite.createCaseDir("workspace");
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "github"),
+      name: "github",
+      description: "GitHub",
+    });
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "weather"),
+      name: "weather",
+      description: "Weather",
+    });
+    await writeSkill({
+      dir: path.join(workspaceDir, "skills", "docs-search"),
+      name: "docs-search",
+      description: "Docs",
+    });
+
+    const snapshot = buildSnapshot(workspaceDir, {
+      agentId: "writer",
+      config: {
+        skills: {
+          policy: {
+            globalEnabled: ["github", "weather"],
+            agentOverrides: {
+              writer: {
+                enabled: ["docs-search"],
+                disabled: ["weather"],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    expect(snapshot.skills.map((skill) => skill.name).toSorted()).toEqual([
+      "docs-search",
+      "github",
+    ]);
+    expect(snapshot.policy).toEqual({
+      agentId: "writer",
+      globalEnabled: ["github", "weather"],
+      agentEnabled: ["docs-search"],
+      agentDisabled: ["weather"],
+      effective: ["docs-search", "github"],
+    });
+  });
+
   it("limits discovery for nested repo-style skills roots (dir/skills/*)", async () => {
     const workspaceDir = await fixtureSuite.createCaseDir("workspace");
     const repoDir = await cloneTemplateDir(nestedRepoTemplateDir, "skills-repo");
