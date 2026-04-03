@@ -901,12 +901,12 @@ export async function syncSkillsToWorkspace(params: {
       typeof params.agentId === "string" && params.agentId.trim().length > 0
         ? resolveEffectiveSkillPolicy(params.config, params.agentId)
         : undefined;
-    if (params.config?.skills?.policy && typeof params.config.skills.policy === "object") {
-      assertNoCanonicalSkillAliasCollisions(rawEntries);
-    }
     const entries = policy
       ? rawEntries.filter((entry) => isSkillAllowedByPolicy(entry, policy))
       : rawEntries;
+    if (params.config?.skills?.policy && typeof params.config.skills.policy === "object") {
+      assertNoCanonicalSkillAliasCollisions(entries);
+    }
 
     await fsp.rm(targetSkillsDir, { recursive: true, force: true });
     await fsp.mkdir(targetSkillsDir, { recursive: true });
@@ -959,6 +959,7 @@ export function buildWorkspaceSkillCommandSpecs(
     managedSkillsDir?: string;
     bundledSkillsDir?: string;
     entries?: SkillEntry[];
+    skipFiltering?: boolean;
     agentId?: string;
     skillFilter?: string[];
     eligibility?: SkillEligibilityContext;
@@ -966,13 +967,15 @@ export function buildWorkspaceSkillCommandSpecs(
   },
 ): SkillCommandSpec[] {
   const skillEntries = opts?.entries ?? loadSkillEntries(workspaceDir, opts);
-  const eligible = filterSkillEntries(
-    skillEntries,
-    opts?.config,
-    opts?.skillFilter,
-    opts?.eligibility,
-    opts?.agentId,
-  ).entries;
+  const eligible = opts?.skipFiltering
+    ? skillEntries
+    : filterSkillEntries(
+        skillEntries,
+        opts?.config,
+        opts?.skillFilter,
+        opts?.eligibility,
+        opts?.agentId,
+      ).entries;
   const userInvocable = eligible.filter((entry) => entry.invocation?.userInvocable !== false);
   const used = new Set<string>();
   for (const reserved of opts?.reservedNames ?? []) {
@@ -1056,6 +1059,7 @@ export function buildWorkspaceSkillCommandSpecs(
       name: unique,
       skillName: rawName,
       description,
+      sourceFilePath: entry.skill.filePath,
       ...(dispatch ? { dispatch } : {}),
     });
   }

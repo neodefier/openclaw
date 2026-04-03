@@ -4,7 +4,11 @@ import {
   resolveAgentSkillsFilter,
   resolveAgentWorkspaceDir,
 } from "../agents/agent-scope.js";
-import { buildWorkspaceSkillCommandSpecs, type SkillCommandSpec } from "../agents/skills.js";
+import {
+  buildWorkspaceSkillCommandSpecs,
+  loadWorkspaceSkillEntries,
+  type SkillCommandSpec,
+} from "../agents/skills.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { logVerbose } from "../globals.js";
 import { getRemoteSkillEligibility } from "../infra/skills-remote.js";
@@ -49,6 +53,7 @@ export function listSkillCommandsForAgents(params: {
   cfg: OpenClawConfig;
   agentIds?: string[];
 }): SkillCommandSpec[] {
+  const remoteEligibility = { remote: getRemoteSkillEligibility() };
   const mergeSkillFilters = (existing?: string[], incoming?: string[]): string[] | undefined => {
     // undefined = no allowlist (unrestricted); [] = explicit empty allowlist (no skills).
     // If any agent is unrestricted for this workspace, keep command discovery unrestricted.
@@ -114,36 +119,41 @@ export function listSkillCommandsForAgents(params: {
             config: params.cfg,
             agentId: scopes[0]?.agentId,
             skillFilter,
-            eligibility: { remote: getRemoteSkillEligibility() },
+            eligibility: remoteEligibility,
             reservedNames: used,
           })
         : (() => {
-            const visibleSkillNames = new Set<string>();
+            const workspaceEntries = loadWorkspaceSkillEntries(workspaceDir, {
+              config: params.cfg,
+            });
+            const visibleSkillPaths = new Set<string>();
             for (const scope of scopes) {
               const scoped = buildWorkspaceSkillCommandSpecs(workspaceDir, {
+                entries: workspaceEntries,
                 config: params.cfg,
                 agentId: scope.agentId,
                 skillFilter: scope.skillFilter,
-                eligibility: { remote: getRemoteSkillEligibility() },
-                reservedNames: used,
+                eligibility: remoteEligibility,
               });
               for (const command of scoped) {
-                const key = command.skillName.trim().toLowerCase();
-                if (key) {
-                  visibleSkillNames.add(key);
+                const sourceFilePath = command.sourceFilePath?.trim();
+                if (sourceFilePath) {
+                  visibleSkillPaths.add(sourceFilePath);
                 }
               }
             }
 
-            const merged = buildWorkspaceSkillCommandSpecs(workspaceDir, {
-              config: params.cfg,
-              skillFilter,
-              eligibility: { remote: getRemoteSkillEligibility() },
-              reservedNames: used,
-            });
-            return merged.filter((command) =>
-              visibleSkillNames.has(command.skillName.trim().toLowerCase()),
+            const mergedVisibleEntries = workspaceEntries.filter((entry) =>
+              visibleSkillPaths.has(entry.skill.filePath),
             );
+
+            return buildWorkspaceSkillCommandSpecs(workspaceDir, {
+              config: params.cfg,
+              entries: mergedVisibleEntries,
+              eligibility: remoteEligibility,
+              reservedNames: used,
+              skipFiltering: true,
+            });
           })();
     for (const command of commands) {
       used.add(command.name.toLowerCase());

@@ -8,6 +8,16 @@ let resolveSkillCommandInvocation: typeof import("./skill-commands.js").resolveS
 let skillCommandsTesting: typeof import("./skill-commands.js").__testing;
 
 type SkillCommandMockRegistrar = (path: string, factory: () => unknown) => void;
+type MockSkillEntry = {
+  skill: {
+    name: string;
+    filePath: string;
+  };
+  description: string;
+  metadata?: {
+    skillKey?: string;
+  };
+};
 
 function resolveUniqueSkillCommandName(base: string, used: Set<string>): string {
   let name = base;
@@ -20,24 +30,87 @@ function resolveUniqueSkillCommandName(base: string, used: Set<string>): string 
   return name;
 }
 
-function resolveWorkspaceSkills(
+function createMockSkillEntry(
   workspaceDir: string,
-): Array<{ skillName: string; description: string }> {
+  dirName: string,
+  params: {
+    skillName: string;
+    description: string;
+    skillKey?: string;
+  },
+): MockSkillEntry {
+  return {
+    skill: {
+      name: params.skillName,
+      filePath: path.join(workspaceDir, "skills", dirName, "SKILL.md"),
+    },
+    description: params.description,
+    ...(params.skillKey ? { metadata: { skillKey: params.skillKey } } : {}),
+  };
+}
+
+function resolveWorkspaceSkillEntries(workspaceDir: string): MockSkillEntry[] {
   const dirName = path.basename(workspaceDir);
   if (dirName === "main") {
-    return [{ skillName: "demo-skill", description: "Demo skill" }];
+    return [
+      createMockSkillEntry(workspaceDir, "demo-skill", {
+        skillName: "demo-skill",
+        description: "Demo skill",
+      }),
+    ];
   }
   if (dirName === "research") {
     return [
-      { skillName: "demo-skill", description: "Demo skill 2" },
-      { skillName: "extra-skill", description: "Extra skill" },
+      createMockSkillEntry(workspaceDir, "demo-skill", {
+        skillName: "demo-skill",
+        description: "Demo skill 2",
+      }),
+      createMockSkillEntry(workspaceDir, "extra-skill", {
+        skillName: "extra-skill",
+        description: "Extra skill",
+      }),
     ];
   }
   if (dirName === "shared-policy") {
     return [
-      { skillName: "alpha-skill", description: "Alpha skill" },
-      { skillName: "beta-skill", description: "Beta skill" },
-      { skillName: "hidden-skill", description: "Hidden skill" },
+      createMockSkillEntry(workspaceDir, "alpha-skill", {
+        skillName: "alpha-skill",
+        description: "Alpha skill",
+      }),
+      createMockSkillEntry(workspaceDir, "beta-skill", {
+        skillName: "beta-skill",
+        description: "Beta skill",
+      }),
+      createMockSkillEntry(workspaceDir, "hidden-skill", {
+        skillName: "hidden-skill",
+        description: "Hidden skill",
+      }),
+    ];
+  }
+  if (dirName === "shared-policy-keys") {
+    return [
+      createMockSkillEntry(workspaceDir, "hidden-shared", {
+        skillName: "shared-skill",
+        description: "Hidden shared skill",
+        skillKey: "shared-hidden",
+      }),
+      createMockSkillEntry(workspaceDir, "visible-shared", {
+        skillName: "shared-skill",
+        description: "Visible shared skill",
+        skillKey: "shared-visible",
+      }),
+    ];
+  }
+  if (dirName === "shared-policy-alias") {
+    return [
+      createMockSkillEntry(workspaceDir, "alpha-dot", {
+        skillName: "alpha.skill",
+        description: "Hidden alias skill",
+      }),
+      createMockSkillEntry(workspaceDir, "alpha-dash", {
+        skillName: "alpha-skill",
+        description: "Visible alias skill",
+      }),
     ];
   }
   return [];
@@ -49,6 +122,8 @@ function buildWorkspaceSkillCommandSpecs(
     reservedNames?: Set<string>;
     skillFilter?: string[];
     agentId?: string;
+    entries?: MockSkillEntry[];
+    skipFiltering?: boolean;
     config?: {
       skills?: {
         policy?: {
@@ -63,8 +138,7 @@ function buildWorkspaceSkillCommandSpecs(
   for (const reserved of opts?.reservedNames ?? []) {
     used.add(String(reserved).toLowerCase());
   }
-  const filter = opts?.skillFilter;
-  const allEntries = resolveWorkspaceSkills(workspaceDir);
+  const allEntries = opts?.entries ?? resolveWorkspaceSkillEntries(workspaceDir);
   const policy = opts?.config?.skills?.policy;
   const override =
     (opts?.agentId ? policy?.agentOverrides?.[opts.agentId] : undefined) ?? undefined;
@@ -78,21 +152,38 @@ function buildWorkspaceSkillCommandSpecs(
         ]),
       )
     : undefined;
-  const entries = allEntries.filter((entry) => {
-    if (filter !== undefined && !filter.some((skillName) => skillName === entry.skillName)) {
-      return false;
-    }
-    if (effectivePolicySkills && !effectivePolicySkills.includes(entry.skillName)) {
-      return false;
-    }
-    return true;
-  });
+  const entries = opts?.skipFiltering
+    ? allEntries
+    : allEntries.filter((entry) => {
+        if (
+          opts?.skillFilter !== undefined &&
+          !opts.skillFilter.some((skillName) => skillName === entry.skill.name)
+        ) {
+          return false;
+        }
+        if (
+          effectivePolicySkills &&
+          !effectivePolicySkills.includes(entry.metadata?.skillKey ?? entry.skill.name)
+        ) {
+          return false;
+        }
+        return true;
+      });
 
   return entries.map((entry) => {
-    const base = entry.skillName.replace(/-/g, "_");
+    const base = entry.skill.name.replace(/[^a-z0-9_]+/gi, "_").toLowerCase();
     const name = resolveUniqueSkillCommandName(base, used);
-    return { name, skillName: entry.skillName, description: entry.description };
+    return {
+      name,
+      skillName: entry.skill.name,
+      description: entry.description,
+      sourceFilePath: entry.skill.filePath,
+    };
   });
+}
+
+function loadWorkspaceSkillEntries(workspaceDir: string) {
+  return resolveWorkspaceSkillEntries(workspaceDir);
 }
 
 function installSkillCommandTestMocks(registerMock: SkillCommandMockRegistrar) {
@@ -108,6 +199,7 @@ function installSkillCommandTestMocks(registerMock: SkillCommandMockRegistrar) {
   // Avoid filesystem-driven skill scanning for these unit tests; we only need command naming semantics.
   registerMock("../agents/skills.js", () => ({
     buildWorkspaceSkillCommandSpecs,
+    loadWorkspaceSkillEntries,
   }));
 }
 
@@ -355,6 +447,67 @@ describe("listSkillCommandsForAgents", () => {
     });
 
     expect(commands.map((entry) => entry.skillName)).toEqual(["alpha-skill", "beta-skill"]);
+  });
+
+  it("keeps hidden same-name skills out of merged shared-workspace commands", async () => {
+    const baseDir = await makeTempDir("openclaw-skills-policy-keys-");
+    const sharedWorkspace = path.join(baseDir, "shared-policy-keys");
+    await fs.mkdir(sharedWorkspace, { recursive: true });
+
+    const commands = listSkillCommandsForAgents({
+      cfg: {
+        agents: {
+          list: [
+            { id: "alpha", workspace: sharedWorkspace },
+            { id: "beta", workspace: sharedWorkspace },
+          ],
+        },
+        skills: {
+          policy: {
+            globalEnabled: ["shared-hidden", "shared-visible"],
+            agentOverrides: {
+              alpha: { disabled: ["shared-hidden"] },
+              beta: { disabled: ["shared-hidden"] },
+            },
+          },
+        },
+      },
+      agentIds: ["alpha", "beta"],
+    });
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]?.skillName).toBe("shared-skill");
+    expect(commands[0]?.description).toBe("Visible shared skill");
+  });
+
+  it("does not suffix visible commands because of policy-hidden alias collisions", async () => {
+    const baseDir = await makeTempDir("openclaw-skills-policy-alias-");
+    const sharedWorkspace = path.join(baseDir, "shared-policy-alias");
+    await fs.mkdir(sharedWorkspace, { recursive: true });
+
+    const commands = listSkillCommandsForAgents({
+      cfg: {
+        agents: {
+          list: [
+            { id: "alpha", workspace: sharedWorkspace },
+            { id: "beta", workspace: sharedWorkspace },
+          ],
+        },
+        skills: {
+          policy: {
+            globalEnabled: ["alpha-skill", "alpha.skill"],
+            agentOverrides: {
+              alpha: { disabled: ["alpha.skill"] },
+              beta: { disabled: ["alpha.skill"] },
+            },
+          },
+        },
+      },
+      agentIds: ["alpha", "beta"],
+    });
+
+    expect(commands.map((entry) => entry.skillName)).toEqual(["alpha-skill"]);
+    expect(commands.map((entry) => entry.name)).toEqual(["alpha_skill"]);
   });
 
   it("skips agents with missing workspaces gracefully", async () => {
